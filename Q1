@@ -1,0 +1,257 @@
+Parameters:
+  EC2KeyPair:
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: 'Project KP'
+    Description: "Enter Your Key Pair Name"
+
+  vpcCIDR:
+    Type: String
+    Default: "10.50.0.0/16"
+    Description: "Enter Your VPC CIDR"
+
+  subnet1CIDR:
+    Type: String
+    Default: "10.50.1.0/24"
+    Description: "Enter Your Subnet 1 CIDR Block"
+
+  subnet2CIDR:
+    Type: String
+    Default: "10.50.2.0/24"
+    Description: "Enter Your Subnet 2 CIDR Block"
+
+  subnet3CIDR:
+    Type: String
+    Default: "10.50.3.0/24"
+    Description: "Enter Your Subnet 3 CIDR Block"
+
+  subnet4CIDR:
+    Type: String
+    Default: "10.50.4.0/24"
+    Description: "Enter Your Subnet 4 CIDR Block"
+
+  az1:
+    Type: String
+    Default: "ap-southeast-2a"
+    Description: "Enter Your AZ-1 ID"
+
+  az2:
+    Type: String
+    Default: "ap-southeast-2b"
+    Description: "Enter Your AZ-2 ID"
+
+  InstanceTypeParameter:
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.micro
+      - m1.small
+      - m1.large
+    Description: Enter t2.micro, m1.small, or m1.large. Default is t2.micro
+
+  amiID:
+    Type: String
+    Default: 'ami-0c2489d63913b3b1f'
+    Description: "Enter Your EC2 AMI ID"
+
+Resources:
+  # DynamoDB Table
+  MetroDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      TableName: metrodb
+
+  # VPC and Network
+  finalexamVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref vpcCIDR
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: stack
+          Value: production
+
+  finalExamInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+      - Key: stack
+        Value: production
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref finalexamVPC
+      InternetGatewayId: !Ref finalExamInternetGateway
+  
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref finalexamVPC
+      CidrBlock: !Ref subnet1CIDR
+      AvailabilityZone: !Ref az1
+      MapPublicIpOnLaunch: true
+      Tags:
+      - Key: Stack
+        Value: production
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref finalexamVPC
+      CidrBlock: !Ref subnet2CIDR
+      AvailabilityZone: !Ref az2
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Stack
+          Value: production
+
+  PrivateSubnet3:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref finalexamVPC
+      CidrBlock: !Ref subnet3CIDR
+      AvailabilityZone: !Ref az1
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Stack
+          Value: production
+      
+  PrivateSubnet4:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref finalexamVPC
+      CidrBlock: !Ref subnet4CIDR
+      AvailabilityZone: !Ref az2
+      Tags:
+        - Key: Stack
+          Value: production
+
+  mainRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref finalexamVPC
+      Tags:
+      - Key: stack
+        Value: production 
+      
+  projectRouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref mainRouteTable
+
+  projectRouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref mainRouteTable
+          
+  mymainRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref mainRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref finalExamInternetGateway
+
+  # Elastic IP
+  EIP:
+    Type: 'AWS::EC2::EIP'
+    Properties:
+      Domain: vpc
+
+  # NAT Gateway
+  NATGateway:
+    Type: 'AWS::EC2::NatGateway'
+    Properties:
+      AllocationId: !GetAtt EIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+
+  # Private Route Table
+  PrivateRouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref finalexamVPC
+      Tags:
+        - Key: stack
+          Value: production
+
+  PrivateRoute:
+    Type: 'AWS::EC2::Route'
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGateway
+
+  PrivateRouteTableAssociation1:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PrivateSubnet3
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateRouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PrivateSubnet4
+      RouteTableId: !Ref PrivateRouteTable
+
+  # Security Group
+  MySecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: "Allow SSH (22) and HTTP (80) access"
+      VpcId: !Ref finalexamVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      
+
+  # EC2 Instances
+  PublicEC2Instance:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      InstanceType: !Ref InstanceTypeParameter
+      KeyName: !Ref EC2KeyPair
+      ImageId: !Ref amiID
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeviceIndex: '0'
+          GroupSet:
+            - !Ref MySecurityGroup
+          SubnetId: !Ref PublicSubnet1
+
+  PrivateEC2Instance:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      InstanceType: !Ref InstanceTypeParameter
+      KeyName: !Ref EC2KeyPair
+      ImageId: !Ref amiID
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: false
+          DeviceIndex: '0'
+          GroupSet:
+            - !Ref MySecurityGroup
+          SubnetId: !Ref PrivateSubnet3
+
+Outputs:
+  PublicIP:
+    Description: Public IP address of the Public EC2 Instance
+    Value: !GetAtt PublicEC2Instance.PublicIp
+
+
